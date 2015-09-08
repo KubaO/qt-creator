@@ -174,13 +174,23 @@ void Environment::prependOrSet(const QString&key, const QString &value, const QS
 
 void Environment::appendOrSetPath(const QString &value)
 {
-    appendOrSet(QLatin1String("PATH"), QDir::toNativeSeparators(value),
-            QString(OsSpecificAspects(m_osType).pathListSeparator()));
+    appendOrSetPath(QLatin1String("PATH"), value);
 }
 
 void Environment::prependOrSetPath(const QString &value)
 {
-    prependOrSet(QLatin1String("PATH"), QDir::toNativeSeparators(value),
+    prependOrSetPath(QLatin1String("PATH"), value);
+}
+
+void Environment::appendOrSetPath(const QString &key, const QString &value)
+{
+    appendOrSet(key, QDir::toNativeSeparators(value),
+            QString(OsSpecificAspects(m_osType).pathListSeparator()));
+}
+
+void Environment::prependOrSetPath(const QString &key, const QString &value)
+{
+    prependOrSet(key, QDir::toNativeSeparators(value),
             QString(OsSpecificAspects(m_osType).pathListSeparator()));
 }
 

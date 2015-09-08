@@ -49,6 +49,7 @@
 #define KEY_ROOT "ProjectExplorer.MsvcToolChain."
 static const char varsBatKeyC[] = KEY_ROOT"VarsBat";
 static const char varsBatArgKeyC[] = KEY_ROOT"VarsBatArg";
+static const char sdkPathKeyC[] = KEY_ROOT"SdkPath";
 static const char supportedAbiKeyC[] = KEY_ROOT"SupportedAbi";
 
 enum { debug = 0 };
@@ -325,6 +326,12 @@ Utils::Environment MsvcToolChain::readEnvironmentSetting(Utils::Environment& env
             result.set(envIter.key(), expandedValue);
     }
 
+    if (! m_sdkPath.isEmpty()) {
+        env.prependOrSetPath(m_sdkPath + QDir::separator() + "bin");
+        env.prependOrSetPath(QLatin1String("LIB"), m_sdkPath + QDir::separator() + "lib");
+        env.prependOrSetPath(QLatin1String("INCLUDE"), m_sdkPath + QDir::separator() + "include");
+    }
+
     if (debug) {
         const QStringList newVars = result.toStringList();
         const QStringList oldVars = env.toStringList();
@@ -345,6 +352,18 @@ MsvcToolChain::MsvcToolChain(const QString &name, const Abi &abi,
                              const QString &varsBat, const QString &varsBatArg, Detection d) :
     AbstractMsvcToolChain(QLatin1String(Constants::MSVC_TOOLCHAIN_ID), d, abi, varsBat),
     m_varsBatArg(varsBatArg)
+{
+    Q_ASSERT(!name.isEmpty());
+
+    setDisplayName(name);
+}
+
+MsvcToolChain::MsvcToolChain(const QString &name, const Abi &abi,
+                             const QString &varsBat, const QString &varsBatArg, const QString &sdkPath,
+                             Detection d) :
+    AbstractMsvcToolChain(QLatin1String(Constants::MSVC_TOOLCHAIN_ID), d, abi, varsBat),
+    m_varsBatArg(varsBatArg),
+    m_sdkPath(sdkPath)
 {
     Q_ASSERT(!name.isEmpty());
 
@@ -426,6 +445,8 @@ QVariantMap MsvcToolChain::toMap() const
     data.insert(QLatin1String(varsBatKeyC), m_vcvarsBat);
     if (!m_varsBatArg.isEmpty())
         data.insert(QLatin1String(varsBatArgKeyC), m_varsBatArg);
+    if (!m_sdkPath.isEmpty())
+        data.insert(QLatin1String(sdkPathKeyC), m_sdkPath);
     data.insert(QLatin1String(supportedAbiKeyC), m_abi.toString());
     return data;
 }
@@ -436,6 +457,7 @@ bool MsvcToolChain::fromMap(const QVariantMap &data)
         return false;
     m_vcvarsBat = QDir::fromNativeSeparators(data.value(QLatin1String(varsBatKeyC)).toString());
     m_varsBatArg = data.value(QLatin1String(varsBatArgKeyC)).toString();
+    m_sdkPath = data.value(QLatin1String(sdkPathKeyC)).toString();
     const QString abiString = data.value(QLatin1String(supportedAbiKeyC)).toString();
     m_abi = Abi(abiString);
 
@@ -535,6 +557,7 @@ QString MsvcToolChainFactory::vcVarsBatFor(const QString &basePath, MsvcToolChai
 QList<ToolChain *> MsvcToolChainFactory::autoDetect()
 {
     QList<ToolChain *> results;
+    QList<QPair<QString,QString>> bundledSDKs;
 
     // 1) Installed SDKs preferred over standalone Visual studio
     const QSettings sdkRegistry(QLatin1String("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Microsoft SDKs\\Windows"),
@@ -550,9 +573,14 @@ QList<ToolChain *> MsvcToolChainFactory::autoDetect()
             QDir dir(folder);
             if (!dir.cd(QLatin1String("bin")))
                 continue;
+
             QFileInfo fi(dir, QLatin1String("SetEnv.cmd"));
-            if (!fi.exists())
+            if (!fi.exists()) {
+                // This could be a bundled SDK
+                if (dir.cd(QLatin1String("../include")) && dir.cd(QLatin1String("../lib")) && dir.cdUp())
+                    bundledSDKs.append(qMakePair(name,dir.absolutePath()));
                 continue;
+            }
 
             QList<ToolChain *> tmp;
             tmp.append(new MsvcToolChain(generateDisplayName(name, MsvcToolChain::WindowsSDK, MsvcToolChain::x86),
@@ -627,7 +655,7 @@ bool MsvcToolChain::operator ==(const ToolChain &other) const
     if (!AbstractMsvcToolChain::operator ==(other))
         return false;
     const MsvcToolChain *msvcTc = static_cast<const MsvcToolChain *>(&other);
-    return m_varsBatArg == msvcTc->m_varsBatArg;
+    return m_varsBatArg == msvcTc->m_varsBatArg && m_sdkPath == msvcTc->m_sdkPath;
 }
 
 bool MsvcToolChainFactory::canRestore(const QVariantMap &data)

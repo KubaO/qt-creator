@@ -47,7 +47,7 @@ namespace Internal {
 class MsvcToolChain : public AbstractMsvcToolChain
 {
 public:
-    enum Type { WindowsSDK, VS };
+    enum Type { WindowsSDK, VS, VSWindowsSDK };
     enum Platform { x86,
                     amd64,
                     x86_amd64,
@@ -60,6 +60,9 @@ public:
 
     MsvcToolChain(const QString &name, const Abi &abi,
                   const QString &varsBat, const QString &varsBatArg, Detection d = ManualDetection);
+    MsvcToolChain(const QString &name, const Abi &abi,
+                  const QString &varsBat, const QString &varsBatArg, const QString &sdkPath,
+                  Detection d = ManualDetection);
     bool isValid() const;
     QList<Utils::FileName> suggestedMkspecList() const;
 
@@ -88,6 +91,7 @@ private:
     MsvcToolChain();
 
     QString m_varsBatArg; // Argument
+    QString m_sdkPath; // bundled sdk path for VSWindowsSDK type
 };
 
 // --------------------------------------------------------------------------
