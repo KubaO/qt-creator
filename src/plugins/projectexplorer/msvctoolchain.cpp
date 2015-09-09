@@ -61,6 +61,25 @@ namespace Internal {
 // Helpers:
 // --------------------------------------------------------------------------
 
+// Represents an SDK bundled with Visual Studio.
+struct BundledSDK {
+    QString version;
+    QString path;
+    QSet<Abi::OSFlavor> flavors;
+    MsvcToolChain::Type type;
+    BundledSDK() : type(MsvcToolChain::VS) {}
+    BundledSDK(const QString & version, const QString & path) :
+        version(version), path(path), type(MsvcToolChain::VSWindowsSDK)
+    {
+        if (version == QLatin1String("v7.1A")) {
+            flavors << Abi::WindowsMsvc2012Flavor << Abi::WindowsMsvc2013Flavor << Abi::WindowsMsvc2015Flavor;
+        }
+    }
+    static bool isBundled(const QString & version) {
+        return version == QLatin1String("v7.1A");
+    }
+};
+
 static QString platformName(MsvcToolChain::Platform t)
 {
     switch (t) {
@@ -157,7 +176,8 @@ static Abi findAbiOfMsvc(MsvcToolChain::Type type, MsvcToolChain::Platform platf
 
 static QString generateDisplayName(const QString &name,
                                    MsvcToolChain::Type t,
-                                   MsvcToolChain::Platform p)
+                                   MsvcToolChain::Platform p,
+                                   const QString &sdkVersion = QString())
 {
     if (t == MsvcToolChain::WindowsSDK) {
         QString sdkName = name;
@@ -165,8 +185,10 @@ static QString generateDisplayName(const QString &name,
         return sdkName;
     }
     // Comes as "9.0" from the registry
+    QString sdk = !sdkVersion.isEmpty() ? QString::fromLatin1("SDK %1 ").arg(sdkVersion) : sdkVersion;
     QString vcName = QLatin1String("Microsoft Visual C++ Compiler ");
     vcName += name;
+    vcName += sdk;
     vcName += QString::fromLatin1(" (%1)").arg(platformName(p));
     return vcName;
 }
@@ -327,9 +349,10 @@ Utils::Environment MsvcToolChain::readEnvironmentSetting(Utils::Environment& env
     }
 
     if (! m_sdkPath.isEmpty()) {
-        env.prependOrSetPath(m_sdkPath + QDir::separator() + "bin");
-        env.prependOrSetPath(QLatin1String("LIB"), m_sdkPath + QDir::separator() + "lib");
-        env.prependOrSetPath(QLatin1String("INCLUDE"), m_sdkPath + QDir::separator() + "include");
+        QString sdkPath = QDir::toNativeSeparators(m_sdkPath);
+        env.prependOrSetPath(sdkPath + QDir::separator() + QLatin1String("bin"));
+        env.prependOrSetPath(QLatin1String("LIB"), sdkPath + QDir::separator() + QLatin1String("lib"));
+        env.prependOrSetPath(QLatin1String("INCLUDE"), sdkPath + QDir::separator() + QLatin1String("include"));
     }
 
     if (debug) {
@@ -349,21 +372,9 @@ Utils::Environment MsvcToolChain::readEnvironmentSetting(Utils::Environment& env
 // --------------------------------------------------------------------------
 
 MsvcToolChain::MsvcToolChain(const QString &name, const Abi &abi,
-                             const QString &varsBat, const QString &varsBatArg, Detection d) :
+                             const QString &varsBat, const QString &varsBatArg, Detection d, const QString &sdkPath) :
     AbstractMsvcToolChain(QLatin1String(Constants::MSVC_TOOLCHAIN_ID), d, abi, varsBat),
-    m_varsBatArg(varsBatArg)
-{
-    Q_ASSERT(!name.isEmpty());
-
-    setDisplayName(name);
-}
-
-MsvcToolChain::MsvcToolChain(const QString &name, const Abi &abi,
-                             const QString &varsBat, const QString &varsBatArg, const QString &sdkPath,
-                             Detection d) :
-    AbstractMsvcToolChain(QLatin1String(Constants::MSVC_TOOLCHAIN_ID), d, abi, varsBat),
-    m_varsBatArg(varsBatArg),
-    m_sdkPath(sdkPath)
+    m_varsBatArg(varsBatArg), m_sdkPath(sdkPath)
 {
     Q_ASSERT(!name.isEmpty());
 
@@ -481,11 +492,15 @@ ToolChain *MsvcToolChain::clone() const
 
 MsvcToolChainConfigWidget::MsvcToolChainConfigWidget(ToolChain *tc) :
     ToolChainConfigWidget(tc),
-    m_varsBatDisplayLabel(new QLabel(this))
+    m_varsBatDisplayLabel(new QLabel(this)),
+    m_sdkPathRowLabel(new QLabel(tr("Bundled SDK Path:"), this)),
+    m_sdkPathDisplayLabel(new QLabel(this))
 {
     m_mainLayout->addRow(new QLabel(tc->displayName()));
     m_varsBatDisplayLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    m_sdkPathDisplayLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
     m_mainLayout->addRow(tr("Initialization:"), m_varsBatDisplayLabel);
+    m_mainLayout->addRow(m_sdkPathRowLabel, m_sdkPathDisplayLabel);
     addErrorLabel();
     setFromToolChain();
 }
@@ -500,6 +515,9 @@ void MsvcToolChainConfigWidget::setFromToolChain()
         varsBatDisplay += tc->varsBatArg();
     }
     m_varsBatDisplayLabel->setText(varsBatDisplay);
+    m_sdkPathDisplayLabel->setText(QDir::toNativeSeparators(tc->sdkPath()));
+    m_sdkPathRowLabel->setHidden(tc->sdkPath().isEmpty());
+    m_sdkPathDisplayLabel->setHidden(tc->sdkPath().isEmpty());
 }
 
 // --------------------------------------------------------------------------
@@ -557,7 +575,8 @@ QString MsvcToolChainFactory::vcVarsBatFor(const QString &basePath, MsvcToolChai
 QList<ToolChain *> MsvcToolChainFactory::autoDetect()
 {
     QList<ToolChain *> results;
-    QList<QPair<QString,QString>> bundledSDKs;
+    QList<BundledSDK> bundledSDKs;
+    bundledSDKs << BundledSDK();
 
     // 1) Installed SDKs preferred over standalone Visual studio
     const QSettings sdkRegistry(QLatin1String("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Microsoft SDKs\\Windows"),
@@ -576,9 +595,10 @@ QList<ToolChain *> MsvcToolChainFactory::autoDetect()
 
             QFileInfo fi(dir, QLatin1String("SetEnv.cmd"));
             if (!fi.exists()) {
-                // This could be a bundled SDK
-                if (dir.cd(QLatin1String("../include")) && dir.cd(QLatin1String("../lib")) && dir.cdUp())
-                    bundledSDKs.append(qMakePair(name,dir.absolutePath()));
+                // This could be an optional SDK bundled with MSVC
+                if (BundledSDK::isBundled(sdkKey))
+                    if (dir.cd(QLatin1String("../include")) && dir.cd(QLatin1String("../lib")) && dir.cdUp())
+                        bundledSDKs << BundledSDK(sdkKey, dir.absolutePath());
                 continue;
             }
 
@@ -631,15 +651,20 @@ QList<ToolChain *> MsvcToolChainFactory::autoDetect()
                       << MsvcToolChain::amd64 << MsvcToolChain::x86_amd64
                       << MsvcToolChain::arm << MsvcToolChain::x86_arm << MsvcToolChain::amd64_arm
                       << MsvcToolChain::ia64 << MsvcToolChain::x86_ia64;
-            foreach (const MsvcToolChain::Platform &platform, platforms) {
-                if (hostSupportsPlatform(platform)
-                        && QFileInfo(vcVarsBatFor(path, platform)).isFile()) {
-                    results.append(new MsvcToolChain(
-                                       generateDisplayName(vsName, MsvcToolChain::VS, platform),
-                                       findAbiOfMsvc(MsvcToolChain::VS, platform, vsName),
-                                       vcvarsAllbat,
-                                       platformName(platform),
-                                       ToolChain::AutoDetection));
+            foreach (const BundledSDK &sdk, bundledSDKs) {
+                foreach (const MsvcToolChain::Platform &platform, platforms) {
+                    if (hostSupportsPlatform(platform)
+                            && QFileInfo(vcVarsBatFor(path, platform)).isFile()) {
+                        Abi abi = findAbiOfMsvc(MsvcToolChain::VS, platform, vsName);
+                        if (sdk.type == MsvcToolChain::VS || sdk.flavors.contains(abi.osFlavor()))
+                        results.append(new MsvcToolChain(
+                                           generateDisplayName(vsName, sdk.type, platform, sdk.version),
+                                           findAbiOfMsvc(MsvcToolChain::VS, platform, vsName),
+                                           vcvarsAllbat,
+                                           platformName(platform),
+                                           ToolChain::AutoDetection,
+                                           sdk.path));
+                    }
                 }
             }
         } else {

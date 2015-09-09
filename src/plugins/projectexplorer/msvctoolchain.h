@@ -59,10 +59,8 @@ public:
                   };
 
     MsvcToolChain(const QString &name, const Abi &abi,
-                  const QString &varsBat, const QString &varsBatArg, Detection d = ManualDetection);
-    MsvcToolChain(const QString &name, const Abi &abi,
-                  const QString &varsBat, const QString &varsBatArg, const QString &sdkPath,
-                  Detection d = ManualDetection);
+                  const QString &varsBat, const QString &varsBatArg, Detection d = ManualDetection,
+                  const QString &sdkPath = QString());
     bool isValid() const;
     QList<Utils::FileName> suggestedMkspecList() const;
 
@@ -79,6 +77,7 @@ public:
     ToolChain *clone() const;
 
     QString varsBatArg() const { return m_varsBatArg; }
+    QString sdkPath() const { return m_sdkPath; }
 
     bool operator == (const ToolChain &) const;
 
@@ -138,6 +137,7 @@ private:
     void setFromToolChain();
 
     QLabel *m_varsBatDisplayLabel;
+    QLabel *m_sdkPathRowLabel, *m_sdkPathDisplayLabel;
 };
 
 } // namespace Internal
