@@ -185,7 +185,7 @@ static QString generateDisplayName(const QString &name,
         return sdkName;
     }
     // Comes as "9.0" from the registry
-    QString sdk = !sdkVersion.isEmpty() ? QString::fromLatin1("SDK %1 ").arg(sdkVersion) : sdkVersion;
+    QString sdk = !sdkVersion.isEmpty() ? QString::fromLatin1(" SDK %1").arg(sdkVersion) : sdkVersion;
     QString vcName = QLatin1String("Microsoft Visual C++ Compiler ");
     vcName += name;
     vcName += sdk;
