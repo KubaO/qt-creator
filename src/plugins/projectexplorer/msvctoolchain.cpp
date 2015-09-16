@@ -66,6 +66,7 @@ struct BundledSDK {
     QString version;
     QString path;
     QSet<Abi::OSFlavor> flavors;
+    QSet<MsvcToolChain::Platform> platforms;
     MsvcToolChain::Type type;
     BundledSDK() : type(MsvcToolChain::VS) {}
     BundledSDK(const QString & version, const QString & path) :
@@ -73,6 +74,7 @@ struct BundledSDK {
     {
         if (version == QLatin1String("v7.1A")) {
             flavors << Abi::WindowsMsvc2012Flavor << Abi::WindowsMsvc2013Flavor << Abi::WindowsMsvc2015Flavor;
+            platforms << MsvcToolChain::x86 << MsvcToolChain::x86_amd64 << MsvcToolChain::amd64;
         }
     }
     static bool isBundled(const QString & version) {
@@ -351,8 +353,12 @@ Utils::Environment MsvcToolChain::readEnvironmentSetting(Utils::Environment& env
     if (! m_sdkPath.isEmpty()) {
         QString sdkPath = QDir::toNativeSeparators(m_sdkPath);
         env.prependOrSetPath(sdkPath + QDir::separator() + QLatin1String("bin"));
-        env.prependOrSetPath(QLatin1String("LIB"), sdkPath + QDir::separator() + QLatin1String("lib"));
         env.prependOrSetPath(QLatin1String("INCLUDE"), sdkPath + QDir::separator() + QLatin1String("include"));
+        QString libPath = sdkPath + QDir::separator() + QLatin1String("lib");
+        if (targetAbi().wordWidth() == 64 && targetAbi().architecture() == Abi::X86Architecture)
+            libPath += QDir::separator() + QLatin1String("x64");
+        env.prependOrSetPath(QLatin1String("LIB"), libPath);
+        env.prependOrSet(QLatin1String("CL"), QLatin1String("/D_USING_V110_SDK71_"), QLatin1String(" "));
     }
 
     if (debug) {
@@ -656,7 +662,8 @@ QList<ToolChain *> MsvcToolChainFactory::autoDetect()
                     if (hostSupportsPlatform(platform)
                             && QFileInfo(vcVarsBatFor(path, platform)).isFile()) {
                         Abi abi = findAbiOfMsvc(MsvcToolChain::VS, platform, vsName);
-                        if (sdk.type == MsvcToolChain::VS || sdk.flavors.contains(abi.osFlavor()))
+                        if (sdk.type == MsvcToolChain::VS ||
+                                (sdk.flavors.contains(abi.osFlavor()) && sdk.platforms.contains(platform)))
                         results.append(new MsvcToolChain(
                                            generateDisplayName(vsName, sdk.type, platform, sdk.version),
                                            findAbiOfMsvc(MsvcToolChain::VS, platform, vsName),
